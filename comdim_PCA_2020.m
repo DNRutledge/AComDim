@@ -65,6 +65,7 @@ function [res_calib]=comdim_PCA_2020(col, Options);
 %-----------------
 % mlr_DB
 % Normalise_DB
+% Compress_Data_2020
 % ColumnsPartition
 % PCA_TW_DNR
 % PCA_Tall_PCT_DNR
@@ -171,6 +172,13 @@ if exist('Options','var')
         loquace= Options.loquace;
     end
 
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    if isfield(Options,'Test')
+        Test= Options.Test;
+    else
+        Options.Test=0;
+        Test= Options.Test;
+    end
 end
 
 DimLabels=[repmat('D',ndim,1),num2str([1:ndim]'),repmat(' ',ndim,6)];
@@ -272,6 +280,9 @@ for dim=1:ndim
     qold=100;
 
     iters=0;
+    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    q_Mat{dim}=qini;
     while and(norm(qold-qini)>threshold, iters<100)
         iters=iters+1;
         qold=qini;
@@ -285,9 +296,14 @@ for dim=1:ndim
         [u,sv,v]=svd(W,'econ');
         qtmp =u(:,1);
     
+        % Takes each table into account for lambda after ICA
         for j=1:ntable
-            % takes each table into account for lambda after ICA
-            lambda(j)=qtmp'*(s_r{j}*s_r{j}')*qtmp;
+%             lambda(j)=qtmp'*(s_r{j}*s_r{j}')*qtmp;
+            % SLOWER but takes up less memory
+            toto=qtmp'*s_r{j};
+            titi=s_r{j}'*qtmp;
+            lambda(j)=toto*titi;
+            
             q=q+(lambda(j)*qtmp); 
         end
 
@@ -296,7 +312,12 @@ for dim=1:ndim
             q=-q;
         end
         qini=q; % updates the initialization of t and so on
-
+        
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        if Test==1
+            q_Mat{dim}=[q_Mat{dim},qini];
+        end
+        
     end %deltafit>threshold
 
     saliences.d(:,dim)=lambda;
@@ -407,20 +428,30 @@ for j=1:ndim
                 L_X{i}(:,j)=col(i).d'*Q.d(:,j); % Unscaled X Loadings "locaux" calculés;
             end
             
-            T_mat=[T_mat,temp_tabCalib{i}.d*temp/(temp'*temp)]; % Scores "locaux"];
-            
-            if  ~isempty(isT)
-                T{i}(:,j)=temp_tabCalib{i}.d*temp/(temp'*temp); % Scores "locaux"
-            end
+%         T_mat=[T_mat,temp_tabCalib{i}.d*temp/(temp'*temp)]; % Scores "locaux"];
+        T_Loc=temp_tabCalib{i}.d*temp/(temp'*temp);
+        T_mat=[T_mat,T_Loc]; % Scores "locaux"];
+
+        if  ~isempty(isT)
+%             T{i}(:,j)=temp_tabCalib{i}.d*temp/(temp'*temp); % Scores "locaux"
+            T{i}(:,j)=T_Loc; % Scores "locaux"
+        end
             
             % Deflate each temp_tabCalib
             temp_tabCalib{i}.d=temp_tabCalib{i}.d-Q.d(:,j)*temp';
         end
     
-    % For each CC
-    % MLR b-coefficients between Local and Global Scores
+    %     % For each CC
+    %     % MLR b-coefficients between Local and Global Scores
     [b0,b(:,j)]=mlr_DB(T_mat,Q.d(:,j),0);
     
+%     for i=1:size(T_mat,2)
+%         [b0,b(i,j)]=mlr_DB(T_mat(:,i),Q.d(:,j),0);
+%         i
+%         j
+%         b(i,j)
+%     end
+
 end
 
 %%%%%% If Output==[], nothing else is calculated
@@ -429,10 +460,28 @@ if ~isempty(Output)
     % Calculate Global Loadings
     if  ~isempty(isP)
         L_CD_Vec=Xnorm_mat'*Q.d; % Scaled CD Loadings "globaux"
+        
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        if Test==1
+            P_Mat={};
+            for dim=1:ndim
+                P_Mat{dim}=Xnorm_mat'*q_Mat{dim};
+            end
+        end
+        
     end
-
+    
     if  ~isempty(isL)
         L_X_Vec=X_mat'*Q.d; % Unscaled X Loadings "globaux"
+        
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        if Test==1
+            Lx_Mat={};
+            for dim=1:ndim
+                Lx_Mat{dim}=X_mat'*q_Mat{dim};
+            end
+        end
+        
     end
 end
 
@@ -465,10 +514,17 @@ if  ~isempty(isP)
     res_calib.P.i=[1:nC]';% numbers of all variables;
     res_calib.P.v=DimLabels; % Dimensions
     res_calib.P.d= L_CD_Vec;
-
+    
     res_calib.P_Loc.i=TableLabels; % Tables
     res_calib.P_Loc.v=DimLabels; % Dimensions
     res_calib.P_Loc.d= L_CD;
+    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    if Test==1
+        res_calib.P_Mat=P_Mat;
+        clear P_Mat;
+    end
+    
 end
 clear L_CD_Vec;
 clear L_CD;
@@ -481,6 +537,13 @@ if  ~isempty(isL)
     res_calib.Lx_Loc.i=TableLabels; % Tables
     res_calib.Lx_Loc.v=DimLabels; % Dimensions
     res_calib.Lx_Loc.d=L_X;
+    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    if Test==1
+        res_calib.Lx_Mat=Lx_Mat;
+        clear Lx_Mat;
+    end
+    
 end
 clear L_X_Vec;
 clear L_X;
@@ -518,6 +581,13 @@ if  ~isempty(Output)
     end
 end
 clear Xnorm_mat;
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+if Test==1
+    res_calib.q_Mat=q_Mat;
+    clear q_Mat;
+end
+
 %%%%%% If Output==[], nothing else is calculated
 
 clear Q;
